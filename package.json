@@ -1,6 +1,6 @@
 {
   "name": "@mollkom/theme-contract",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Framework-neutral contract for Mollkom themes and Theme Studio",
   "type": "module",
   "sideEffects": false,
