@@ -5,6 +5,7 @@ import {
   THEME_PAGE_COMPONENTS,
   THEME_PAGE_TYPES,
   THEME_REQUIRED_MAIN_COMPONENT,
+  certifyThemeDocument,
   isStorefrontEditorHostMessage,
   isStorefrontEditorStudioMessage,
   isThemeDocument,
@@ -21,6 +22,30 @@ test('every page has a canonical allowlist and commerce kernel', () => {
   assert.equal(THEME_REQUIRED_MAIN_COMPONENT.product, 'MainProduct');
   assert.equal(THEME_REQUIRED_MAIN_COMPONENT.collection, 'MainCollection');
   assert.equal(THEME_REQUIRED_MAIN_COMPONENT.cart, 'MainCart');
+});
+
+test('certifies safe documents and rejects invalid commerce or executable HTML', () => {
+  const certified = certifyThemeDocument('product', {
+    root: { props: { textColor: '#111111', backgroundColor: '#ffffff' } },
+    content: [{ type: 'MainProduct', props: { id: 'main-product' } }],
+    zones: {},
+  });
+  assert.equal(certified.passed, true);
+
+  const rejected = certifyThemeDocument('product', {
+    root: { props: { textColor: '#ffffff', backgroundColor: '#ffffff' } },
+    content: [
+      { type: 'MainProduct', props: { id: 'duplicate' } },
+      { type: 'MainProduct', props: { id: 'duplicate' } },
+      { type: 'CustomHTML', props: { id: 'html', html: '<script>alert(1)</script>' } },
+    ],
+    zones: {},
+  });
+  assert.equal(rejected.passed, false);
+  assert.equal(rejected.checks.find((check) => check.id === 'semantic-main')?.passed, false);
+  assert.equal(rejected.checks.find((check) => check.id === 'component-ids')?.passed, false);
+  assert.equal(rejected.checks.find((check) => check.id === 'html-safety')?.passed, false);
+  assert.equal(rejected.checks.find((check) => check.id === 'color-contrast')?.passed, false);
 });
 
 test('validates JSON-safe theme documents', () => {

@@ -6,7 +6,10 @@
  * imports. Runtime services are injected by the experience plane.
  */
 export const THEME_SCHEMA_VERSION = 1;
-export const THEME_RUNTIME_VERSION = '0.2.0';
+export const THEME_RUNTIME_VERSION = '0.3.0';
+export const THEME_CERTIFICATION_VERSION = '2026-08-16.1';
+export const THEME_MAX_COMPONENTS = 100;
+export const THEME_MAX_DOCUMENT_BYTES = 524_288;
 export const THEME_STUDIO_PROTOCOL_VERSION = 1;
 export const STOREFRONT_EDITOR_BRIDGE_CHANNEL = 'mollkom-storefront-editor-v1';
 export const THEME_PAGE_TYPES = [
@@ -114,6 +117,154 @@ export function isThemeDocument(value) {
             && typeof node.type === 'string'
             && !!node.props
             && typeof node.props === 'object');
+}
+function flattenThemeNodes(document) {
+    return [
+        ...document.content,
+        ...Object.values(document.zones ?? {}).flat(),
+    ];
+}
+function countComponent(nodes, type) {
+    return nodes.reduce((count, node) => count + (node.type === type ? 1 : 0), 0);
+}
+function hasDangerousHtml(value) {
+    if (typeof value === 'string') {
+        return /<\s*script\b|\bon[a-z]+\s*=|javascript\s*:/i.test(value);
+    }
+    if (Array.isArray(value))
+        return value.some(hasDangerousHtml);
+    if (!value || typeof value !== 'object')
+        return false;
+    return Object.values(value).some(hasDangerousHtml);
+}
+function parseHexColor(value) {
+    if (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value))
+        return null;
+    return [
+        Number.parseInt(value.slice(1, 3), 16),
+        Number.parseInt(value.slice(3, 5), 16),
+        Number.parseInt(value.slice(5, 7), 16),
+    ];
+}
+function relativeLuminance(color) {
+    const channels = color.map((channel) => {
+        const normalized = channel / 255;
+        return normalized <= 0.04045
+            ? normalized / 12.92
+            : ((normalized + 0.055) / 1.055) ** 2.4;
+    });
+    return (channels[0] ?? 0) * 0.2126
+        + (channels[1] ?? 0) * 0.7152
+        + (channels[2] ?? 0) * 0.0722;
+}
+function colorContrast(foreground, background) {
+    const foregroundRgb = parseHexColor(foreground);
+    const backgroundRgb = parseHexColor(background);
+    if (!foregroundRgb || !backgroundRgb)
+        return null;
+    const lighter = Math.max(relativeLuminance(foregroundRgb), relativeLuminance(backgroundRgb));
+    const darker = Math.min(relativeLuminance(foregroundRgb), relativeLuminance(backgroundRgb));
+    return (lighter + 0.05) / (darker + 0.05);
+}
+/**
+ * Deterministic, framework-neutral pre-publish gate. It intentionally checks
+ * only properties that can be proven from the JSON document. Visual, browser,
+ * and performance certification remain separate release-pipeline gates.
+ */
+export function certifyThemeDocument(pageType, value) {
+    const validDocument = isThemeDocument(value);
+    const document = validDocument ? value : { root: {}, content: [], zones: {} };
+    const nodes = flattenThemeNodes(document);
+    const allowed = new Set(THEME_PAGE_COMPONENTS[pageType]);
+    const disallowed = [...new Set(nodes.map((node) => node.type).filter((type) => !allowed.has(type)))];
+    const requiredMain = THEME_REQUIRED_MAIN_COMPONENT[pageType];
+    const mainCount = requiredMain ? countComponent(nodes, requiredMain) : 0;
+    const ids = nodes
+        .map((node) => node.props.id)
+        .filter((id) => typeof id === 'string' && id.length > 0);
+    const duplicateIds = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
+    let documentBytes = THEME_MAX_DOCUMENT_BYTES + 1;
+    try {
+        documentBytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    }
+    catch {
+        // Non-JSON-safe documents fail the size/shape checks below.
+    }
+    const dangerousHtmlNodes = nodes
+        .filter((node) => node.type === 'CustomHTML' && hasDangerousHtml(node.props));
+    const rootProps = document.root.props ?? {};
+    const contrast = colorContrast(rootProps.textColor, rootProps.backgroundColor);
+    const checks = [
+        {
+            id: 'document-shape',
+            passed: validDocument,
+            severity: 'blocker',
+            message: validDocument ? 'Theme document shape is valid.' : 'Theme document shape is invalid.',
+        },
+        {
+            id: 'component-allowlist',
+            passed: disallowed.length === 0,
+            severity: 'blocker',
+            message: disallowed.length === 0
+                ? 'All components are allowed for this page.'
+                : `Disallowed components: ${disallowed.join(', ')}.`,
+        },
+        {
+            id: 'semantic-main',
+            passed: requiredMain === null || mainCount === 1,
+            severity: 'blocker',
+            message: requiredMain === null
+                ? 'This page has no required commerce kernel.'
+                : `${requiredMain} count is ${mainCount}; exactly one is required.`,
+        },
+        {
+            id: 'component-count',
+            passed: nodes.length <= THEME_MAX_COMPONENTS,
+            severity: 'blocker',
+            message: `${nodes.length}/${THEME_MAX_COMPONENTS} components.`,
+        },
+        {
+            id: 'component-ids',
+            passed: ids.length === nodes.length && duplicateIds.length === 0,
+            severity: 'blocker',
+            message: duplicateIds.length > 0
+                ? `Duplicate component ids: ${duplicateIds.join(', ')}.`
+                : ids.length === nodes.length
+                    ? 'Every component has a unique id.'
+                    : 'Every component must have an id.',
+        },
+        {
+            id: 'document-size',
+            passed: documentBytes <= THEME_MAX_DOCUMENT_BYTES,
+            severity: 'blocker',
+            message: `${documentBytes}/${THEME_MAX_DOCUMENT_BYTES} bytes.`,
+        },
+        {
+            id: 'html-safety',
+            passed: dangerousHtmlNodes.length === 0,
+            severity: 'blocker',
+            message: dangerousHtmlNodes.length === 0
+                ? 'Custom HTML contains no executable markup.'
+                : 'Custom HTML contains executable or event-handler markup.',
+        },
+        {
+            id: 'color-contrast',
+            passed: contrast === null || contrast >= 4.5,
+            severity: 'blocker',
+            message: contrast === null
+                ? 'Root contrast is not applicable.'
+                : `Root text contrast is ${contrast.toFixed(2)}:1.`,
+        },
+    ];
+    return {
+        passed: checks.every((check) => check.severity !== 'blocker' || check.passed),
+        certificationVersion: THEME_CERTIFICATION_VERSION,
+        schemaVersion: THEME_SCHEMA_VERSION,
+        pageType,
+        componentCount: nodes.length,
+        documentBytes,
+        checks,
+    };
 }
 function hasBridgeEnvelope(value, sessionId) {
     if (!value || typeof value !== 'object')

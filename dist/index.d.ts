@@ -6,7 +6,10 @@
  * imports. Runtime services are injected by the experience plane.
  */
 export declare const THEME_SCHEMA_VERSION: 1;
-export declare const THEME_RUNTIME_VERSION: "0.2.0";
+export declare const THEME_RUNTIME_VERSION: "0.3.0";
+export declare const THEME_CERTIFICATION_VERSION: "2026-08-16.1";
+export declare const THEME_MAX_COMPONENTS: 100;
+export declare const THEME_MAX_DOCUMENT_BYTES: 524288;
 export declare const THEME_STUDIO_PROTOCOL_VERSION: 1;
 export declare const STOREFRONT_EDITOR_BRIDGE_CHANNEL: "mollkom-storefront-editor-v1";
 export declare const THEME_PAGE_TYPES: readonly ["index", "product", "collection", "cart", "page"];
@@ -43,6 +46,26 @@ export interface ThemeRuntimeIdentity {
     runtimeVersion: string;
     themePackageVersion?: string;
     themePackageHash?: string;
+}
+export type ThemeCertificationSeverity = 'blocker' | 'warning';
+export interface ThemeCertificationCheck {
+    id: 'document-shape' | 'component-allowlist' | 'semantic-main' | 'component-count' | 'component-ids' | 'document-size' | 'html-safety' | 'color-contrast';
+    passed: boolean;
+    severity: ThemeCertificationSeverity;
+    message: string;
+}
+export interface ThemeCertificationReport {
+    passed: boolean;
+    certificationVersion: typeof THEME_CERTIFICATION_VERSION;
+    schemaVersion: typeof THEME_SCHEMA_VERSION;
+    pageType: ThemePageType;
+    componentCount: number;
+    documentBytes: number;
+    checks: ThemeCertificationCheck[];
+}
+export interface ThemeAiProposal {
+    summary: string;
+    data: ThemeDocument;
 }
 export interface ThemeStudioSessionClaims {
     audience: 'mollkom-theme-studio';
@@ -147,6 +170,12 @@ export type StorefrontEditorStudioMessage<TData extends ThemeDocument = ThemeDoc
 export declare function isThemePageType(value: string): value is ThemePageType;
 export declare function isThemeComponentId(value: string): value is ThemeComponentId;
 export declare function isThemeDocument(value: unknown): value is ThemeDocument;
+/**
+ * Deterministic, framework-neutral pre-publish gate. It intentionally checks
+ * only properties that can be proven from the JSON document. Visual, browser,
+ * and performance certification remain separate release-pipeline gates.
+ */
+export declare function certifyThemeDocument(pageType: ThemePageType, value: unknown): ThemeCertificationReport;
 export declare function isStorefrontEditorHostMessage(value: unknown, sessionId: string): value is StorefrontEditorHostMessage;
 export declare function isStorefrontEditorStudioMessage(value: unknown, sessionId: string): value is StorefrontEditorStudioMessage;
 export {};
