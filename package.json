@@ -1,0 +1,31 @@
+{
+  "name": "@mollkom/theme-contract",
+  "version": "0.2.0",
+  "description": "Framework-neutral contract for Mollkom themes and Theme Studio",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "pnpm build && node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.9.2"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@10.17.1",
+  "license": "MIT"
+}
